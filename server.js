@@ -3,25 +3,33 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
-const db = require('./lib/db');
+const store = require('./lib/store');
 const { seed } = require('./lib/seed');
 const { CATEGORIES, ACTIVITIES, byCode } = require('./lib/categories');
 
 const PORT = process.env.PORT || 3000;
-if (seed()) console.log('Khởi tạo dữ liệu mẫu lần đầu. Tài khoản: admin / Admin@123 (hãy đổi mật khẩu).');
-
 const app = express();
 app.disable('x-powered-by');
 // Chạy sau proxy HTTPS (Railway, Nginx...) để lấy đúng IP người dùng và cho phép cookie secure
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
+
+// Phiên đăng nhập lưu trong PostgreSQL (nếu có) để không bị đăng xuất khi deploy lại
+const sessionStore = store.pool
+  ? new (require('connect-pg-simple')(session))({ pool: store.pool, createTableIfMissing: true })
+  : undefined;
+
 app.use(session({
   name: 'bctc.sid',
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === '1', maxAge: 8 * 3600 * 1000 }
 }));
+
+// Bọc handler async để lỗi được chuyển tới middleware xử lý lỗi
+const a = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // ---------- Xác thực ----------
 const loginAttempts = new Map(); // chống dò mật khẩu: tối đa 5 lần sai / 15 phút / IP
@@ -45,14 +53,14 @@ function requireEditor(req, res, next) {
 const publicUser = u => ({ id: u.id, username: u.username, fullName: u.fullName, role: u.role });
 
 // Kiểm tra tình trạng cho nền tảng triển khai (Railway healthcheck)
-app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.get('/healthz', (req, res) => res.json({ ok: true, store: store.kind }));
 
 app.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', a(async (req, res) => {
   const ip = req.ip;
   const now = Date.now();
   const rec = loginAttempts.get(ip) || { count: 0, first: now };
@@ -60,7 +68,7 @@ app.post('/api/login', (req, res) => {
   if (rec.count >= 5) return res.status(429).json({ error: 'Sai quá nhiều lần, thử lại sau 15 phút' });
 
   const { username, password } = req.body || {};
-  const user = db.load().users.find(u => u.username === String(username || '').trim());
+  const user = await store.getUserByUsername(String(username || '').trim());
   if (!user || !bcrypt.compareSync(String(password || ''), user.passwordHash)) {
     rec.count++;
     loginAttempts.set(ip, rec);
@@ -72,7 +80,7 @@ app.post('/api/login', (req, res) => {
     req.session.user = publicUser(user);
     res.json({ user: req.session.user });
   });
-});
+}));
 
 app.post('/api/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
@@ -85,85 +93,63 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 
 app.get('/api/me', (req, res) => res.json({ user: req.session.user }));
 
-app.post('/api/me/password', (req, res) => {
+app.post('/api/me/password', a(async (req, res) => {
   const { oldPassword, newPassword } = req.body || {};
-  const state = db.load();
-  const user = state.users.find(u => u.id === req.session.user.id);
+  const user = await store.getUserById(req.session.user.id);
   if (!user || !bcrypt.compareSync(String(oldPassword || ''), user.passwordHash)) return res.status(400).json({ error: 'Mật khẩu cũ không đúng' });
   if (String(newPassword || '').length < 8) return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 8 ký tự' });
-  user.passwordHash = bcrypt.hashSync(newPassword, 10);
-  db.save();
+  await store.setUserPassword(user.id, bcrypt.hashSync(newPassword, 10));
   res.json({ ok: true });
-});
+}));
 
 // ---------- Người dùng (admin) ----------
 const ROLES = ['admin', 'ketoan', 'xem'];
 
-app.get('/api/users', requireAdmin, (req, res) => res.json(db.load().users.map(publicUser)));
+app.get('/api/users', requireAdmin, a(async (req, res) => res.json((await store.listUsers()).map(publicUser))));
 
-app.post('/api/users', requireAdmin, (req, res) => {
+app.post('/api/users', requireAdmin, a(async (req, res) => {
   const { username, fullName, role, password } = req.body || {};
-  const state = db.load();
   if (!username || !password || String(password).length < 8) return res.status(400).json({ error: 'Cần tên đăng nhập và mật khẩu tối thiểu 8 ký tự' });
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'Vai trò không hợp lệ' });
-  if (state.users.some(u => u.username === username)) return res.status(400).json({ error: 'Tên đăng nhập đã tồn tại' });
-  const user = { id: db.id(), username: String(username).trim(), fullName: fullName || username, role, passwordHash: bcrypt.hashSync(password, 10), createdAt: new Date().toISOString() };
-  state.users.push(user);
-  db.save();
+  const name = String(username).trim();
+  if (await store.getUserByUsername(name)) return res.status(400).json({ error: 'Tên đăng nhập đã tồn tại' });
+  const user = await store.createUser({ id: crypto.randomUUID(), username: name, fullName: fullName || name, role, passwordHash: bcrypt.hashSync(password, 10), createdAt: new Date().toISOString() });
   res.json(publicUser(user));
-});
+}));
 
-app.delete('/api/users/:id', requireAdmin, (req, res) => {
-  const state = db.load();
+app.delete('/api/users/:id', requireAdmin, a(async (req, res) => {
   if (req.params.id === req.session.user.id) return res.status(400).json({ error: 'Không thể xoá chính mình' });
-  state.users = state.users.filter(u => u.id !== req.params.id);
-  db.save();
+  await store.deleteUser(req.params.id);
   res.json({ ok: true });
-});
+}));
 
 // ---------- Danh mục & thiết lập ----------
-app.get('/api/meta', (req, res) => {
-  const s = db.load();
-  res.json({ categories: CATEGORIES, activities: ACTIVITIES, settings: s.settings, projects: s.projects });
-});
+app.get('/api/meta', a(async (req, res) => {
+  res.json({ categories: CATEGORIES, activities: ACTIVITIES, settings: await store.getSettings(), projects: await store.listProjects() });
+}));
 
-app.put('/api/settings', requireAdmin, (req, res) => {
-  const s = db.load();
+app.put('/api/settings', requireAdmin, a(async (req, res) => {
   const { openingBalance, companyName } = req.body || {};
-  if (openingBalance !== undefined) s.settings.openingBalance = Number(openingBalance) || 0;
-  if (companyName !== undefined) s.settings.companyName = String(companyName);
-  db.save();
-  res.json(s.settings);
-});
+  const patch = {};
+  if (openingBalance !== undefined) patch.openingBalance = Number(openingBalance) || 0;
+  if (companyName !== undefined) patch.companyName = String(companyName);
+  res.json(await store.updateSettings(patch));
+}));
 
 // ---------- Dự án ----------
-app.post('/api/projects', requireEditor, (req, res) => {
+app.post('/api/projects', requireEditor, a(async (req, res) => {
   const { code, name, client, contractValue, start, end } = req.body || {};
   if (!code || !name) return res.status(400).json({ error: 'Cần mã và tên dự án' });
-  const s = db.load();
-  const p = { id: db.id(), code, name, client: client || '', contractValue: Number(contractValue) || 0, start: start || '', end: end || '' };
-  s.projects.push(p);
-  db.save();
-  res.json(p);
-});
+  res.json(await store.createProject({ id: crypto.randomUUID(), code, name, client: client || '', contractValue: Number(contractValue) || 0, start: start || '', end: end || '' }));
+}));
 
-app.delete('/api/projects/:id', requireAdmin, (req, res) => {
-  const s = db.load();
-  if (s.transactions.some(t => t.projectId === req.params.id)) return res.status(400).json({ error: 'Dự án đã có phát sinh, không thể xoá' });
-  s.projects = s.projects.filter(p => p.id !== req.params.id);
-  db.save();
+app.delete('/api/projects/:id', requireAdmin, a(async (req, res) => {
+  if (await store.projectHasTransactions(req.params.id)) return res.status(400).json({ error: 'Dự án đã có phát sinh, không thể xoá' });
+  await store.deleteProject(req.params.id);
   res.json({ ok: true });
-});
+}));
 
 // ---------- Giao dịch thu/chi ----------
-function filterTx(q) {
-  const { from, to, projectId, kind } = q;
-  return db.load().transactions.filter(t =>
-    (!from || t.date >= from) && (!to || t.date <= to) &&
-    (!projectId || (projectId === '_none' ? !t.projectId : t.projectId === projectId)) &&
-    (!kind || t.kind === kind));
-}
-
 function validateTx(body) {
   const { date, category, amount, kind } = body || {};
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return 'Ngày không hợp lệ';
@@ -173,74 +159,68 @@ function validateTx(body) {
   return null;
 }
 
-app.get('/api/transactions', (req, res) => {
-  res.json(filterTx(req.query).sort((a, b) => b.date.localeCompare(a.date)));
-});
+app.get('/api/transactions', a(async (req, res) => {
+  const { from, to, projectId, kind } = req.query;
+  res.json((await store.listTransactions({ from, to, projectId, kind })).sort((x, y) => y.date.localeCompare(x.date)));
+}));
 
-app.post('/api/transactions', requireEditor, (req, res) => {
+app.post('/api/transactions', requireEditor, a(async (req, res) => {
   const err = validateTx(req.body);
   if (err) return res.status(400).json({ error: err });
   const { date, projectId, category, amount, kind, description } = req.body;
-  const t = { id: db.id(), date, projectId: projectId || null, category, amount: Number(amount), kind, description: description || '', createdBy: req.session.user.username, createdAt: new Date().toISOString() };
-  db.load().transactions.push(t);
-  db.save();
-  res.json(t);
-});
+  res.json(await store.createTransaction({ id: crypto.randomUUID(), date, projectId: projectId || null, category, amount: Number(amount), kind, description: description || '', createdBy: req.session.user.username, createdAt: new Date().toISOString() }));
+}));
 
-app.put('/api/transactions/:id', requireEditor, (req, res) => {
+app.put('/api/transactions/:id', requireEditor, a(async (req, res) => {
   const err = validateTx(req.body);
   if (err) return res.status(400).json({ error: err });
-  const t = db.load().transactions.find(x => x.id === req.params.id);
+  const { date, projectId, category, amount, kind, description } = req.body;
+  const t = await store.updateTransaction(req.params.id, { date, projectId: projectId || null, category, amount: Number(amount), kind, description: description || '', updatedBy: req.session.user.username, updatedAt: new Date().toISOString() });
   if (!t) return res.status(404).json({ error: 'Không tìm thấy' });
-  const { date, projectId, category, amount, kind, description } = req.body;
-  Object.assign(t, { date, projectId: projectId || null, category, amount: Number(amount), kind, description: description || '', updatedBy: req.session.user.username, updatedAt: new Date().toISOString() });
-  db.save();
   res.json(t);
-});
+}));
 
-app.delete('/api/transactions/:id', requireEditor, (req, res) => {
-  const s = db.load();
-  s.transactions = s.transactions.filter(t => t.id !== req.params.id);
-  db.save();
+app.delete('/api/transactions/:id', requireEditor, a(async (req, res) => {
+  await store.deleteTransaction(req.params.id);
   res.json({ ok: true });
-});
+}));
 
 // ---------- Báo cáo ----------
 const signed = t => (byCode[t.category].flow === 'in' ? t.amount : -t.amount);
 
 // Báo cáo lưu chuyển tiền tệ (B03-DN, phương pháp trực tiếp) cho một kỳ
-app.get('/api/reports/cashflow-statement', (req, res) => {
+app.get('/api/reports/cashflow-statement', a(async (req, res) => {
   const { from = '2026-01-01', to = '2026-12-31', kind = 'actual', projectId } = req.query;
-  const s = db.load();
-  const all = s.transactions.filter(t => t.kind === kind && (!projectId || t.projectId === projectId));
-  const opening = (projectId ? 0 : s.settings.openingBalance) + all.filter(t => t.date < from).reduce((a, t) => a + signed(t), 0);
-  const inPeriod = all.filter(t => t.date >= from && t.date <= to);
+  const settings = await store.getSettings();
+  const all = await store.listTransactions({ kind, projectId, to });
+  const opening = (projectId ? 0 : Number(settings.openingBalance) || 0) + all.filter(t => t.date < from).reduce((s, t) => s + signed(t), 0);
+  const inPeriod = all.filter(t => t.date >= from);
 
   const sections = Object.entries(ACTIVITIES).map(([act, title]) => {
     const lines = CATEGORIES.filter(c => c.activity === act).map(c => ({
       code: c.code, ms: c.ms, name: c.name, flow: c.flow,
-      amount: inPeriod.filter(t => t.category === c.code).reduce((a, t) => a + signed(t), 0)
+      amount: inPeriod.filter(t => t.category === c.code).reduce((s, t) => s + signed(t), 0)
     }));
-    return { activity: act, title, lines, net: lines.reduce((a, l) => a + l.amount, 0) };
+    return { activity: act, title, lines, net: lines.reduce((s, l) => s + l.amount, 0) };
   });
-  const net = sections.reduce((a, x) => a + x.net, 0);
+  const net = sections.reduce((s, x) => s + x.net, 0);
   res.json({ from, to, kind, opening, sections, net, closing: opening + net });
-});
+}));
 
 // Dòng tiền theo tháng: kế hoạch vs thực tế, số dư lũy kế
-app.get('/api/reports/monthly', (req, res) => {
+app.get('/api/reports/monthly', a(async (req, res) => {
   const { year = '2026', projectId } = req.query;
-  const s = db.load();
+  const settings = await store.getSettings();
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
-  const tx = s.transactions.filter(t => (!projectId || t.projectId === projectId));
+  const tx = await store.listTransactions({ projectId, to: `${year}-12-31` });
   const result = {};
   for (const kind of ['plan', 'actual']) {
     const k = tx.filter(t => t.kind === kind);
-    let bal = (projectId ? 0 : s.settings.openingBalance) + k.filter(t => t.date < `${year}-01-01`).reduce((a, t) => a + signed(t), 0);
+    let bal = (projectId ? 0 : Number(settings.openingBalance) || 0) + k.filter(t => t.date < `${year}-01-01`).reduce((s, t) => s + signed(t), 0);
     result[kind] = months.map(m => {
       const mt = k.filter(t => t.date.startsWith(m));
-      const inflow = mt.filter(t => byCode[t.category].flow === 'in').reduce((a, t) => a + t.amount, 0);
-      const outflow = mt.filter(t => byCode[t.category].flow === 'out').reduce((a, t) => a + t.amount, 0);
+      const inflow = mt.filter(t => byCode[t.category].flow === 'in').reduce((s, t) => s + t.amount, 0);
+      const outflow = mt.filter(t => byCode[t.category].flow === 'out').reduce((s, t) => s + t.amount, 0);
       bal += inflow - outflow;
       const byCategory = {};
       for (const t of mt) byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
@@ -248,14 +228,14 @@ app.get('/api/reports/monthly', (req, res) => {
     });
   }
   res.json({ year, months, ...result });
-});
+}));
 
 // Tổng hợp theo dự án
-app.get('/api/reports/projects', (req, res) => {
-  const s = db.load();
-  res.json(s.projects.map(p => {
-    const tx = s.transactions.filter(t => t.projectId === p.id);
-    const sum = (kind, flow) => tx.filter(t => t.kind === kind && byCode[t.category].flow === flow).reduce((a, t) => a + t.amount, 0);
+app.get('/api/reports/projects', a(async (req, res) => {
+  const [projects, allTx] = await Promise.all([store.listProjects(), store.listTransactions()]);
+  res.json(projects.map(p => {
+    const tx = allTx.filter(t => t.projectId === p.id);
+    const sum = (kind, flow) => tx.filter(t => t.kind === kind && byCode[t.category].flow === flow).reduce((s, t) => s + t.amount, 0);
     const thu = sum('actual', 'in'), chi = sum('actual', 'out');
     return {
       ...p,
@@ -265,11 +245,18 @@ app.get('/api/reports/projects', (req, res) => {
       receivable: p.contractValue - thu
     };
   }));
-});
+}));
 
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Lỗi máy chủ' });
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Hệ thống báo cáo tài chính chạy tại http://localhost:${PORT}`));
+(async () => {
+  await store.init();
+  if (await seed()) console.log('Khởi tạo dữ liệu mẫu lần đầu. Tài khoản: admin (mật khẩu theo ADMIN_PASSWORD, mặc định Admin@123).');
+  app.listen(PORT, '0.0.0.0', () => console.log(`Hệ thống báo cáo tài chính chạy tại http://localhost:${PORT} (lưu trữ: ${store.location})`));
+})().catch(err => {
+  console.error('Không khởi động được:', err);
+  process.exit(1);
+});
