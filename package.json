@@ -1,0 +1,22 @@
+{
+  "name": "bao-cao-tai-chinh",
+  "version": "0.1.0",
+  "description": "Hệ thống báo cáo tài chính & dòng tiền dự án xây dựng (bản sơ khai)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node lib/seed.js --force"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "chart.js": "^4.4.1",
+    "express": "^4.22.3",
+    "express-session": "^1.19.0"
+  }
+}
