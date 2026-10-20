@@ -4,13 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Báo cáo Tài chính &amp; Dòng tiền</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/style.css">
   <script src="/vendor/chart.umd.js"></script>
 </head>
 <body>
+  <div class="appbar">
   <header class="top">
-    <div class="brand">Báo cáo Tài chính &amp; Dòng tiền <small id="company"></small></div>
-    <div class="user"><span id="userName"></span>
+    <div class="brand"><div class="logo">BC</div><div>Báo cáo Tài chính &amp; Dòng tiền<small id="company"></small></div></div>
+    <div class="user"><div class="avatar" id="avatar"></div><span id="userName"></span>
       <button class="btn" id="btnPwd">Đổi mật khẩu</button>
       <button class="btn" id="btnLogout">Đăng xuất</button>
     </div>
@@ -23,6 +27,7 @@
     <button data-view="projects">Dự án</button>
     <button data-view="admin" id="tabAdmin" hidden>Quản trị</button>
   </nav>
+  </div>
 
   <main>
     <!-- Tổng quan -->
@@ -67,7 +72,7 @@
           <div class="spacer"></div>
           <button class="btn ghost" onclick="window.print()">In</button>
         </div>
-        <h2 style="text-align:center">BÁO CÁO LƯU CHUYỂN TIỀN TỆ<br><span class="sub" id="stmtSub"></span></h2>
+        <div class="report-title"><div class="name">BÁO CÁO LƯU CHUYỂN TIỀN TỆ</div><div class="sub" id="stmtSub"></div></div>
         <div class="table-wrap"><table id="statementTable"></table></div>
       </div>
     </section>

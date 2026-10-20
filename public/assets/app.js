@@ -44,11 +44,20 @@ function fillProjectSelect(sel, { all = true, none = false } = {}) {
     META.projects.map(p => `<option value="${p.id}">${esc(p.code)} · ${esc(p.name)}</option>`).join('');
 }
 
+// Bảng màu biểu đồ theo nhận diện navy – teal
+const C = { navy: '#0b2545', navy2: '#13315c', teal: '#0fa3a3', teal2: '#2cc2b8', in: '#0fa3a3', out: '#e06363', plan: '#c9821a' };
+Chart.defaults.font.family = 'Montserrat, "Segoe UI", Arial, sans-serif';
+Chart.defaults.font.size = 11.5;
+Chart.defaults.color = '#66748a';
+Chart.defaults.borderColor = '#edf1f6';
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+
 async function init() {
   ME = (await api('/api/me')).user;
   META = await api('/api/meta');
   META.categories.forEach(c => (CAT[c.code] = c));
-  $('#userName').textContent = `${ME.fullName} (${ME.role})`;
+  $('#userName').textContent = ME.fullName;
+  $('#avatar').textContent = (ME.fullName || ME.username).trim().split(/\s+/).pop()[0].toUpperCase();
   $('#company').textContent = META.settings.companyName || '';
   if (ME.role === 'admin') $('#tabAdmin').hidden = false;
   if (!canEdit()) document.querySelectorAll('.editor').forEach(b => (b.hidden = true));
@@ -105,9 +114,9 @@ async function loadDashboard() {
   drawChart('chartMonthly', {
     type: 'bar',
     data: { labels, datasets: [
-      { label: 'Thu', data: m.actual.map(x => x.inflow / 1e6), backgroundColor: '#1a8a5a' },
-      { label: 'Chi', data: m.actual.map(x => -x.outflow / 1e6), backgroundColor: '#c0392b' },
-      { label: 'Dòng tiền thuần', type: 'line', data: m.actual.map(x => (x.month <= today ? x.net / 1e6 : null)), borderColor: '#1f4e8c', backgroundColor: '#1f4e8c', tension: .3 }
+      { label: 'Thu', data: m.actual.map(x => x.inflow / 1e6), backgroundColor: C.in, borderRadius: 4 },
+      { label: 'Chi', data: m.actual.map(x => -x.outflow / 1e6), backgroundColor: C.out, borderRadius: 4 },
+      { label: 'Dòng tiền thuần', type: 'line', data: m.actual.map(x => (x.month <= today ? x.net / 1e6 : null)), borderColor: C.navy, backgroundColor: C.navy, borderWidth: 2.5, tension: .3 }
     ] },
     options: { plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.raw)} tr` } } }, scales: { x: { stacked: true }, y: { ticks: { callback: v => fmt(v) + ' tr' } } } }
   });
@@ -117,15 +126,15 @@ async function loadDashboard() {
   const mixKeys = Object.keys(mix).sort((a, b) => mix[b] - mix[a]);
   drawChart('chartMix', {
     type: 'doughnut',
-    data: { labels: mixKeys.map(k => CAT[k].name), datasets: [{ data: mixKeys.map(k => mix[k] / 1e6), backgroundColor: ['#1f4e8c', '#2d6cc0', '#5b9be0', '#9cc3ee', '#c27c0e', '#e0a84b', '#7b8597', '#b4bccb', '#c0392b', '#1a8a5a'] }] },
-    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { callbacks: { label: c => `${fmt(c.raw)} tr` } } } }
+    data: { labels: mixKeys.map(k => CAT[k].name), datasets: [{ data: mixKeys.map(k => mix[k] / 1e6), backgroundColor: ['#0b2545', '#13315c', '#1d4677', '#0f7f86', '#0fa3a3', '#2cc2b8', '#8fdcd5', '#8da2bf', '#c3cfdf', '#e06363'], borderWidth: 2, borderColor: '#fff' }] },
+    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } }, tooltip: { callbacks: { label: c => `${fmt(c.raw)} tr` } } } }
   });
 
   drawChart('chartBalance', {
     type: 'line',
     data: { labels, datasets: [
-      { label: 'Kế hoạch', data: m.plan.map(x => x.balance / 1e6), borderColor: '#c27c0e', borderDash: [6, 4], tension: .3 },
-      { label: 'Thực tế', data: m.actual.map(x => (x.month <= today ? x.balance / 1e6 : null)), borderColor: '#1f4e8c', backgroundColor: 'rgba(31,78,140,.1)', fill: true, tension: .3 }
+      { label: 'Kế hoạch', data: m.plan.map(x => x.balance / 1e6), borderColor: C.plan, borderDash: [6, 4], borderWidth: 2, pointRadius: 2, tension: .3 },
+      { label: 'Thực tế', data: m.actual.map(x => (x.month <= today ? x.balance / 1e6 : null)), borderColor: C.teal, backgroundColor: ctx => { const { chart } = ctx; const g = chart.ctx.createLinearGradient(0, chart.chartArea?.top || 0, 0, chart.chartArea?.bottom || 300); g.addColorStop(0, 'rgba(15,163,163,.35)'); g.addColorStop(1, 'rgba(11,37,69,.02)'); return g; }, borderWidth: 2.5, fill: true, tension: .3 }
     ] },
     options: { plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.raw)} tr` } } }, scales: { y: { ticks: { callback: v => fmt(v) + ' tr' } } } }
   });
