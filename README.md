@@ -46,6 +46,20 @@ Tạo lại dữ liệu mẫu: `npm run seed` (xoá toàn bộ dữ liệu hiệ
 | `ADMIN_USER`, `ADMIN_PASSWORD` | Tài khoản admin khởi tạo lần đầu |
 | `DB_FILE` | Đường dẫn file dữ liệu (mặc định `data/db.json`) |
 
+## Triển khai lên Railway
+
+1. Đăng nhập https://railway.com bằng GitHub → **New Project** → **Deploy from GitHub repo** → chọn `Baocaotaichinh`.
+2. Vào service → tab **Variables**, thêm:
+   - `SESSION_SECRET` = chuỗi ngẫu nhiên dài (≥ 32 ký tự)
+   - `COOKIE_SECURE` = `1`
+   - `ADMIN_PASSWORD` = mật khẩu admin ban đầu
+   - `DB_FILE` = `/data/db.json`
+3. Chuột phải vào service → **Attach Volume** → Mount path: `/data` (giữ dữ liệu khi deploy lại; thiếu bước này dữ liệu sẽ mất sau mỗi lần deploy).
+4. Tab **Settings → Networking** → **Generate Domain** để có địa chỉ `https://xxx.up.railway.app`.
+5. Mỗi lần push lên nhánh `main`, Railway tự động build & deploy lại.
+
+Cấu hình build/khởi động nằm trong `railway.json` (healthcheck tại `/healthz`).
+
 ## Cấu trúc
 
 ```

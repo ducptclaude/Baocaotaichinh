@@ -12,6 +12,8 @@ if (seed()) console.log('Khởi tạo dữ liệu mẫu lần đầu. Tài kho�
 
 const app = express();
 app.disable('x-powered-by');
+// Chạy sau proxy HTTPS (Railway, Nginx...) để lấy đúng IP người dùng và cho phép cookie secure
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(session({
   name: 'bctc.sid',
@@ -41,6 +43,9 @@ function requireEditor(req, res, next) {
 }
 
 const publicUser = u => ({ id: u.id, username: u.username, fullName: u.fullName, role: u.role });
+
+// Kiểm tra tình trạng cho nền tảng triển khai (Railway healthcheck)
+app.get('/healthz', (req, res) => res.json({ ok: true }));
 
 app.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
@@ -267,4 +272,4 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Lỗi máy chủ' });
 });
 
-app.listen(PORT, () => console.log(`Hệ thống báo cáo tài chính chạy tại http://localhost:${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Hệ thống báo cáo tài chính chạy tại http://localhost:${PORT}`));
