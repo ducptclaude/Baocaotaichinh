@@ -70,7 +70,7 @@
           <label>Dự án <select id="sProject"></select></label>
           <button class="btn ghost" id="btnStatement">Xem báo cáo</button>
           <div class="spacer"></div>
-          <button class="btn ghost" onclick="window.print()">In</button>
+          <button class="btn ghost" id="btnPrint">In</button>
         </div>
         <div class="report-title"><div class="name">BÁO CÁO LƯU CHUYỂN TIỀN TỆ</div><div class="sub" id="stmtSub"></div></div>
         <div class="table-wrap"><table id="statementTable"></table></div>
@@ -111,6 +111,18 @@
         <div class="toolbar"><h2 style="margin:0">Người dùng</h2><div class="spacer"></div><button class="btn" id="btnAddUser">+ Thêm người dùng</button></div>
         <div class="table-wrap"><table id="userTable"></table></div>
       </div>
+      <div class="panel">
+        <div class="toolbar"><h2 style="margin:0">Tường lửa &amp; bảo mật</h2><div class="spacer"></div><button class="btn ghost" id="btnSecRefresh">Làm mới</button></div>
+        <div class="sec-grid" id="secConfig"></div>
+        <div class="grid2 sec-lists">
+          <div><h3 class="h3">IP đang bị chặn</h3><div class="table-wrap"><table id="banTable"></table></div></div>
+          <div><h3 class="h3">Tài khoản đang bị khoá</h3><div class="table-wrap"><table id="lockTable"></table></div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Nhật ký bảo mật &amp; thao tác <span class="sub">200 sự kiện gần nhất</span></h2>
+        <div class="table-wrap audit"><table id="auditTable"></table></div>
+      </div>
     </section>
   </main>
 
@@ -146,7 +158,7 @@
       <label>Tên đăng nhập <input name="username" required></label>
       <label>Họ tên <input name="fullName"></label>
       <label>Vai trò <select name="role"><option value="xem">Chỉ xem</option><option value="ketoan">Kế toán (nhập liệu)</option><option value="admin">Quản trị</option></select></label>
-      <label>Mật khẩu (≥ 8 ký tự) <input name="password" type="password" minlength="8" required></label>
+      <label class="full">Mật khẩu (≥ 10 ký tự, có chữ hoa, thường, số, ký tự đặc biệt) <input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
     </div>
     <div class="actions"><button class="btn ghost" value="cancel" formnovalidate>Huỷ</button><button class="btn" value="ok">Lưu</button></div>
   </form></dialog>
@@ -155,7 +167,7 @@
     <h3>Đổi mật khẩu</h3>
     <div class="fields">
       <label class="full">Mật khẩu hiện tại <input name="oldPassword" type="password" required></label>
-      <label class="full">Mật khẩu mới (≥ 8 ký tự) <input name="newPassword" type="password" minlength="8" required></label>
+      <label class="full">Mật khẩu mới (≥ 10 ký tự, có chữ hoa, thường, số, ký tự đặc biệt) <input name="newPassword" type="password" minlength="10" autocomplete="new-password" required></label>
     </div>
     <div class="actions"><button class="btn ghost" value="cancel" formnovalidate>Huỷ</button><button class="btn" value="ok">Lưu</button></div>
   </form></dialog>

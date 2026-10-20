@@ -65,10 +65,66 @@ Kiểm tra: `https://<domain>/healthz` trả về `"store":"postgres"`.
 
 Cấu hình build/khởi động nằm trong `railway.json`.
 
+## Bảo mật & chống DDoS
+
+Hệ thống bảo vệ theo nhiều lớp. Lớp L3/L4 (ngập băng thông, SYN/UDP flood) **không thể chặn trong ứng dụng**:
+lưu lượng phải được lọc ở biên mạng trước khi tới máy chủ. Vì vậy cần đặt Cloudflare phía trước Railway.
+
+| Lớp | Mối đe doạ | Biện pháp | Ở đâu |
+|---|---|---|---|
+| L3/L4 | SYN flood, UDP flood, ngập băng thông | Mạng chống DDoS Anycast | Cloudflare (+ Railway Edge) |
+| L7 | HTTP flood | Rate limiting, WAF, Bot Fight, Under Attack mode | Cloudflare |
+| L7 | HTTP flood lọt qua biên | Giới hạn 300 req/phút/IP, API 120 req/phút/IP; vượt nhiều lần → tự chặn IP 60 phút | Ứng dụng |
+| L7 | Quá tải | Đo độ trễ xử lý; quá 300 ms thì từ chối bớt request lạ, ưu tiên người đã đăng nhập | Ứng dụng |
+| L7 | Slowloris, kết nối treo | Cắt kết nối gửi header quá 15 giây, request quá 30 giây | Ứng dụng |
+| L7 | Dò mật khẩu | 10 lần/15 phút/IP; khoá tài khoản 15 phút sau 5 lần sai; thời gian phản hồi như nhau | Ứng dụng |
+| L7 | Quét lỗ hổng (.env, .git, wp-admin, .php, ../) | Trả 404 và cộng điểm vi phạm → chặn IP | Ứng dụng |
+| L7 | XSS, clickjacking, MIME sniffing | Content-Security-Policy chặn script lạ, chặn nhúng iframe, HSTS | Ứng dụng |
+| L7 | CSRF | Cookie SameSite=Strict, chỉ nhận JSON cùng nguồn gốc | Ứng dụng |
+| L7 | Chiếm phiên | Cookie HttpOnly/Secure, tự đăng xuất sau 30 phút không thao tác, tối đa 8 giờ | Ứng dụng |
+| Dữ liệu | CSV injection | Vô hiệu hoá ô bắt đầu bằng = + - @ khi xuất CSV | Ứng dụng |
+| Kiểm soát | Truy vết | Nhật ký đăng nhập, thao tác dữ liệu, IP bị chặn (lưu 12 tháng) | Quản trị → Nhật ký |
+
+Mật khẩu mới: tối thiểu 10 ký tự, có chữ hoa, chữ thường, chữ số và ký tự đặc biệt.
+
+### Đưa Cloudflare đứng trước Railway (bắt buộc để chống DDoS L3/L4)
+
+Cần một tên miền riêng (ví dụ `baocao.congty.vn`).
+
+1. Thêm tên miền vào Cloudflare (gói Free là đủ), đổi nameserver tại nhà cung cấp tên miền theo hướng dẫn của Cloudflare.
+2. Railway → service web → **Settings → Networking → Custom Domain** → nhập `baocao.congty.vn`, Railway cho một bản ghi CNAME.
+3. Cloudflare → **DNS** → thêm bản ghi CNAME đó, bật **Proxied** (đám mây màu cam).
+4. Cloudflare → **SSL/TLS** → chế độ **Full (strict)**.
+5. Cloudflare → **Security**: bật **Bot Fight Mode**; tạo **WAF → Rate limiting rule**: đường dẫn `/api/login`, 5 request / 10 giây / IP → Block.
+   Khi đang bị tấn công: **Overview → Under Attack Mode**.
+6. Chặn truy cập vòng qua Cloudflare (đi thẳng vào `*.up.railway.app`):
+   - Tạo một chuỗi bí mật ngẫu nhiên dài.
+   - Cloudflare → **Rules → Transform Rules → Modify Request Header** → áp dụng cho mọi request → **Set static** header `X-Origin-Secret` = chuỗi bí mật.
+   - Railway → **Variables**: `CF_ORIGIN_SECRET` = cùng chuỗi bí mật.
+   - Từ đây mọi request không đi qua Cloudflare bị trả 403 (trừ `/healthz` cho Railway kiểm tra).
+7. Kiểm tra: tab **Quản trị → Tường lửa & bảo mật** hiển thị "Chỉ nhận truy cập qua Cloudflare: Bật".
+
+### Biến môi trường bảo mật (tuỳ chọn)
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `CF_ORIGIN_SECRET` | (trống) | Chỉ nhận request đi qua Cloudflare có header `X-Origin-Secret` khớp |
+| `ALLOWED_IPS` | (trống = mọi IP) | Chỉ cho phép IP/dải IP, ví dụ `113.160.10.5,203.113.0.0/16` (IP văn phòng) |
+| `RATE_LIMIT_PER_MIN` | 300 | Số request tối đa / IP / phút |
+| `API_RATE_LIMIT_PER_MIN` | 120 | Số request API tối đa / IP / phút |
+| `LOGIN_RATE_LIMIT` | 10 | Số lần thử đăng nhập / IP / 15 phút |
+| `LOGIN_MAX_FAILS` / `LOGIN_LOCK_MINUTES` | 5 / 15 | Khoá tài khoản sau N lần sai liên tiếp |
+| `BAN_SCORE` / `BAN_MINUTES` | 20 / 60 | Điểm vi phạm để tự chặn IP / thời gian chặn |
+| `SESSION_IDLE_MINUTES` / `SESSION_MAX_HOURS` | 30 / 8 | Tự đăng xuất khi không thao tác / thời hạn tối đa phiên |
+| `EVENT_LOOP_LAG_LIMIT_MS` | 300 | Ngưỡng quá tải để từ chối bớt request lạ |
+
+Danh sách IP bị chặn và tài khoản bị khoá lưu trong bộ nhớ, được xoá khi deploy lại.
+
 ## Cấu trúc
 
 ```
 server.js              API + xác thực (Express)
+lib/security.js        Tường lửa L7: giới hạn tần suất, chặn IP, chống dò mật khẩu, CSRF
 lib/categories.js      Danh mục dòng tiền ↔ mã số B03-DN
 lib/store/pg.js        Lưu trữ PostgreSQL (bảng users, projects, transactions, settings)
 lib/store/json.js      Lưu trữ file JSON (chạy thử trên máy)

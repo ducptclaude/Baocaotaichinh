@@ -10,8 +10,8 @@ const monthLabel = m => 'T' + Number(m.slice(5));
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
   if (res.status === 401) { location.href = '/login'; throw new Error('401'); }
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Có lỗi xảy ra'); throw new Error(data.error); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(data.error || `Có lỗi xảy ra (${res.status})`); throw new Error(data.error); }
   return data;
 }
 
@@ -184,7 +184,9 @@ $('#btnCsv').addEventListener('click', () => {
     const c = CAT[t.category];
     rows.push([t.date, t.kind === 'plan' ? 'Kế hoạch' : 'Thực tế', projName(t.projectId), c.activity, c.ms, c.name, t.description, c.flow === 'in' ? t.amount : '', c.flow === 'out' ? t.amount : '']);
   });
-  const csv = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  // Ô văn bản bắt đầu bằng = + - @ bị Excel hiểu là công thức -> thêm dấu ' để vô hiệu (chống CSV injection)
+  const cell = v => { let s = String(v); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
+  const csv = '﻿' + rows.map(r => r.map(cell).join(',')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = `so-thu-chi_${$('#fFrom').value}_${$('#fTo').value}.csv`;
@@ -276,7 +278,47 @@ async function loadAdmin() {
   $('#userTable').innerHTML = '<thead><tr><th>Tên đăng nhập</th><th>Họ tên</th><th>Vai trò</th><th></th></tr></thead><tbody>' +
     users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.fullName)}</td><td>${roleName[u.role]}</td>
       <td>${u.id !== ME.id ? `<button class="btn danger sm" data-delu="${u.id}">Xoá</button>` : '<span class="muted">(bạn)</span>'}</td></tr>`).join('') + '</tbody>';
+  loadSecurity();
 }
+
+// ===== Tường lửa & nhật ký =====
+const AUDIT_LABEL = {
+  login_success: 'Đăng nhập', login_fail: 'Đăng nhập sai', login_locked: 'Tài khoản bị khoá', logout: 'Đăng xuất',
+  password_change: 'Đổi mật khẩu', password_change_fail: 'Đổi mật khẩu thất bại', user_create: 'Thêm người dùng', user_delete: 'Xoá người dùng',
+  user_unlock: 'Mở khoá tài khoản', settings_update: 'Sửa thiết lập', project_create: 'Thêm dự án', project_delete: 'Xoá dự án',
+  tx_create: 'Thêm giao dịch', tx_update: 'Sửa giao dịch', tx_delete: 'Xoá giao dịch', ip_banned: 'Chặn IP tự động', ip_unban: 'Bỏ chặn IP'
+};
+const AUDIT_ALERT = ['login_fail', 'login_locked', 'ip_banned', 'password_change_fail'];
+
+async function loadSecurity() {
+  const [st, logs] = await Promise.all([api('/api/security/status'), api('/api/security/audit')]);
+  const c = st.config;
+  const item = (label, value, ok) => `<div class="sec-item"><div class="label">${label}</div><div class="value ${ok === false ? 'warn' : ''}">${value}</div></div>`;
+  $('#secConfig').innerHTML = [
+    item('Chỉ nhận truy cập qua Cloudflare', c.cloudflareOnly ? 'Bật' : 'Chưa bật', c.cloudflareOnly),
+    item('Danh sách IP được phép', c.allowedIps.length ? esc(c.allowedIps.join(', ')) : 'Mọi IP'),
+    item('Giới hạn truy cập', `${c.globalPerMin} req/phút · API ${c.apiPerMin}/phút`),
+    item('Đăng nhập', `${c.loginPer15Min} lần/15 phút/IP · khoá TK sau ${c.userMaxFails} lần sai (${c.userLockMin} phút)`),
+    item('Tự động chặn IP', `≥ ${c.banScore} điểm vi phạm → chặn ${c.banMin} phút`),
+    item('Độ trễ xử lý hiện tại', st.eventLoopLagMs + ' ms', st.eventLoopLagMs < 200)
+  ].join('');
+  $('#banTable').innerHTML = '<thead><tr><th>IP</th><th>Lý do</th><th class="num">Còn</th><th></th></tr></thead><tbody>' +
+    (st.bans.map(b => `<tr><td>${esc(b.ip)}</td><td class="wrap">${esc(b.reason)}</td><td class="num">${b.minutesLeft} phút</td><td><button class="btn sm ghost" data-unban="${esc(b.ip)}">Bỏ chặn</button></td></tr>`).join('') ||
+      '<tr><td colspan="4" class="muted">Không có IP nào bị chặn</td></tr>') + '</tbody>';
+  $('#lockTable').innerHTML = '<thead><tr><th>Tài khoản</th><th class="num">Còn</th><th></th></tr></thead><tbody>' +
+    (st.lockedUsers.map(u => `<tr><td>${esc(u.username)}</td><td class="num">${u.minutesLeft} phút</td><td><button class="btn sm ghost" data-unlock="${esc(u.username)}">Mở khoá</button></td></tr>`).join('') ||
+      '<tr><td colspan="3" class="muted">Không có tài khoản nào bị khoá</td></tr>') + '</tbody>';
+  $('#auditTable').innerHTML = '<thead><tr><th>Thời gian</th><th>Sự kiện</th><th>Người dùng</th><th>IP</th><th>Chi tiết</th></tr></thead><tbody>' +
+    logs.map(l => `<tr class="${AUDIT_ALERT.includes(l.action) ? 'alert' : ''}"><td>${new Date(l.at).toLocaleString('vi-VN')}</td>
+      <td>${esc(AUDIT_LABEL[l.action] || l.action)}</td><td>${esc(l.username || '')}</td><td>${esc(l.ip || '')}</td><td class="wrap">${esc(l.detail || '')}</td></tr>`).join('') + '</tbody>';
+}
+$('#btnSecRefresh').addEventListener('click', loadSecurity);
+$('#view-admin').addEventListener('click', async e => {
+  const { unban, unlock } = e.target.dataset;
+  if (unban) { await api('/api/security/unban', { method: 'POST', body: { ip: unban } }); toast('Đã bỏ chặn ' + unban); loadSecurity(); }
+  if (unlock) { await api('/api/security/unlock', { method: 'POST', body: { username: unlock } }); toast('Đã mở khoá ' + unlock); loadSecurity(); }
+});
+$('#btnPrint').addEventListener('click', () => window.print());
 $('#btnSaveSettings').addEventListener('click', async () => {
   META.settings = await api('/api/settings', { method: 'PUT', body: { companyName: $('#setCompany').value, openingBalance: $('#setOpening').value } });
   $('#company').textContent = META.settings.companyName;

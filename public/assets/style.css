@@ -131,3 +131,15 @@ dialog::backdrop { background: rgba(7,26,51,.55); backdrop-filter: blur(2px); }
 .report-title .name { font-size: 18px; font-weight: 800; letter-spacing: .04em; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .report-title .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
 @media print { .report-title .name { color: #000; background: none; } }
+
+/* Tường lửa & nhật ký */
+.sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.sec-item { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--grad-soft); }
+.sec-item .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.sec-item .value { font-weight: 700; margin-top: 4px; color: var(--navy-800); }
+.sec-item .value.warn { color: var(--warn); }
+.sec-lists { grid-template-columns: 1fr 1fr; }
+.h3 { font-size: 13px; margin: 0 0 8px; color: var(--navy-700); }
+.table-wrap.audit { max-height: 460px; overflow-y: auto; }
+tr.alert td { background: #fff4f4; }
+tr.alert td:nth-child(2) { color: var(--out); font-weight: 600; }
