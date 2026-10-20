@@ -4,38 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Đăng nhập · Báo cáo tài chính</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
   <div class="login-wrap">
-    <div class="login-shell">
-      <div class="login-brand">
-        <div>
-          <div class="logo">BC</div>
-          <h2>Báo cáo Tài chính<br>&amp; Dòng tiền dự án</h2>
-          <p>Quản trị dòng tiền, kế hoạch và báo cáo tài chính cho doanh nghiệp xây dựng.</p>
-          <ul>
-            <li>Báo cáo lưu chuyển tiền tệ B03-DN</li>
-            <li>Kế hoạch so với thực tế theo tháng</li>
-            <li>Theo dõi thu chi từng công trình</li>
-          </ul>
-        </div>
-        <div class="foot">© 2026 · Hệ thống nội bộ</div>
-      </div>
-      <form class="login-card" id="loginForm">
-        <h1>Đăng nhập</h1>
-        <p>Vui lòng nhập tài khoản được cấp để tiếp tục</p>
-        <label for="username">Tên đăng nhập</label>
-        <input id="username" name="username" autocomplete="username" required autofocus>
-        <label for="password">Mật khẩu</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required>
-        <button class="btn" type="submit">Đăng nhập</button>
-        <div class="error" id="error"></div>
-      </form>
-    </div>
+    <form class="login-card" id="loginForm">
+      <h1>Báo cáo Tài chính &amp; Dòng tiền</h1>
+      <p>Đăng nhập để tiếp tục</p>
+      <label for="username">Tên đăng nhập</label>
+      <input id="username" name="username" autocomplete="username" required autofocus>
+      <label for="password">Mật khẩu</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button class="btn" type="submit">Đăng nhập</button>
+      <div class="error" id="error"></div>
+    </form>
   </div>
   <script>
     document.getElementById('loginForm').addEventListener('submit', async e => {

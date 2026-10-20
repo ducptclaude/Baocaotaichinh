@@ -44,34 +44,28 @@ Tạo lại dữ liệu mẫu: `npm run seed` (xoá toàn bộ dữ liệu hiệ
 | `SESSION_SECRET` | Khoá ký phiên đăng nhập – **bắt buộc đặt khi triển khai thật** |
 | `COOKIE_SECURE=1` | Bật khi chạy qua HTTPS |
 | `ADMIN_USER`, `ADMIN_PASSWORD` | Tài khoản admin khởi tạo lần đầu |
-| `DATABASE_URL` | Chuỗi kết nối PostgreSQL; nếu không đặt, dữ liệu lưu vào file JSON |
-| `DB_FILE` | Đường dẫn file JSON khi không dùng PostgreSQL (mặc định `data/db.json`) |
+| `DB_FILE` | Đường dẫn file dữ liệu (mặc định `data/db.json`) |
 
 ## Triển khai lên Railway
 
 1. Đăng nhập https://railway.com bằng GitHub → **New Project** → **Deploy from GitHub repo** → chọn `Baocaotaichinh`.
-2. Trong project bấm **+ Create → Database → PostgreSQL**.
-3. Vào service web → tab **Variables**, thêm:
-   - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (tham chiếu tới service Postgres)
+2. Vào service → tab **Variables**, thêm:
    - `SESSION_SECRET` = chuỗi ngẫu nhiên dài (≥ 32 ký tự)
    - `COOKIE_SECURE` = `1`
    - `ADMIN_PASSWORD` = mật khẩu admin ban đầu
+   - `DB_FILE` = `/data/db.json`
+3. Chuột phải vào service → **Attach Volume** → Mount path: `/data` (giữ dữ liệu khi deploy lại; thiếu bước này dữ liệu sẽ mất sau mỗi lần deploy).
 4. Tab **Settings → Networking** → **Generate Domain** để có địa chỉ `https://xxx.up.railway.app`.
 5. Mỗi lần push lên nhánh `main`, Railway tự động build & deploy lại.
 
-Khi khởi động, hệ thống tự tạo bảng trong PostgreSQL và nạp dữ liệu mẫu nếu CSDL còn trống.
-Phiên đăng nhập cũng lưu trong PostgreSQL nên người dùng không bị đăng xuất khi deploy lại.
-Kiểm tra: `https://<domain>/healthz` trả về `"store":"postgres"`.
-
-Cấu hình build/khởi động nằm trong `railway.json`.
+Cấu hình build/khởi động nằm trong `railway.json` (healthcheck tại `/healthz`).
 
 ## Cấu trúc
 
 ```
 server.js              API + xác thực (Express)
 lib/categories.js      Danh mục dòng tiền ↔ mã số B03-DN
-lib/store/pg.js        Lưu trữ PostgreSQL (bảng users, projects, transactions, settings)
-lib/store/json.js      Lưu trữ file JSON (chạy thử trên máy)
+lib/db.js              Lưu trữ JSON (sẽ thay bằng CSDL)
 lib/seed.js            Dữ liệu mẫu
 public/login.html      Trang đăng nhập
 public/index.html      Giao diện chính
@@ -80,7 +74,7 @@ public/assets/         CSS + JS phía trình duyệt
 
 ## Lộ trình đề xuất
 
-- [x] Lưu trữ PostgreSQL
+- [ ] Chuyển lưu trữ sang PostgreSQL / SQL Server
 - [ ] Báo cáo KQKD (B02-DN), Bảng CĐKT (B01-DN)
 - [ ] Nhập dữ liệu từ Excel, xuất báo cáo Excel/PDF theo mẫu
 - [ ] Công nợ phải thu CĐT / phải trả NCC, thầu phụ (tuổi nợ)
